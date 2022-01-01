@@ -1,16 +1,29 @@
 //jshint esversion:6
 import bodyParser from "body-parser"
 import express from "express"
-import ejs from "ejs"
 import mongoose from "mongoose"
-import bcrypt from "bcrypt"
-const saltRounds = 10
+import passport from "passport"
+import passportLocalMongoose from "passport-local-mongoose"
+import session from "express-session"
+import dotenv from "dotenv"
+import LocalStrategy from "passport-local"
+dotenv.config()
 
-//initialize app
-const app = express();
-app.set('view engine', 'ejs');
-app.use(bodyParser.urlencoded({ extended: true }));
-app.use(express.static("public"));
+//initialize app, packages and modules
+const app = express()
+app.use(express.static("public"))
+app.set('view engine', 'ejs')
+app.use(bodyParser.urlencoded({ extended: true }))
+
+//passport
+app.use(session({
+    secret: process.env.SECRET,
+    resave: false,
+    saveUninitialized: true,
+    cookie: { secure: true }
+}))
+app.use(passport.initialize())
+passport.session()
 
 //mongoose connection
 const URI = 'mongodb://localhost:27017/userDB'
@@ -24,7 +37,14 @@ const userSchema = new mongoose.Schema({
     password: String
 })
 
+userSchema.plugin(passportLocalMongoose)
+
 const User = mongoose.model("User", userSchema)
+
+//passport users
+passport.use(new LocalStrategy(User.authenticate()))
+passport.serializeUser(User.serializeUser())
+passport.deserializeUser(User.deserializeUser())
 
 app.get("/", (req, res) => {
     res.render("home")
@@ -35,30 +55,6 @@ app.route("/login")
         res.render("login")
     })
     .post((req, res) => {
-        const loginEmail = req.body.username
-        const password = req.body.password
-        User.findOne({ email: loginEmail }, (err, user) => {
-            if (!err) {
-                if (user) {
-                    bcrypt.compare(password, user.password, function (err, result) {
-                        if (!err) {
-                            if (result) {
-                                res.render("secrets")
-                            } else {
-                                res.render("login")
-                            }
-                        } else {
-                            res.send(`Unable to login due to ${err}.`)
-                        }
-                    })
-                } else {
-                    res.render("register")
-                }
-            } else {
-                res.send(`Unable to login due to ${err}.`)
-            }
-
-        })
     })
 
 app.route("/register")
@@ -66,21 +62,26 @@ app.route("/register")
         res.render("register")
     })
     .post((req, res) => {
-        bcrypt.hash(req.body.password, saltRounds, (err, hash) => {
-            const newUser = new User({
-                email: req.body.username,
-                password: hash
-            })
-            newUser.save((err) => {
-                if (!err) {
-                    res.render("secrets")
-                } else {
-                    res.send(err)
+        User.register({ username: req.body.username }, req.body.password, (err, user) => {
+            if (err) {
+                console.log(err)
+                res.redirect("/register")
+            } else {
+                passport.authenticate("local")(req, res), () => {
+                    console.log(req)
+                    res.redirect("/secrets")
                 }
-            })
+            }
         })
+    })
 
-
+app.route("/secrets")
+    .get((req, res) => {
+        if (req.isAuthenticated()) {
+            res.render("secrets")
+        } else {
+            res.redirect("/login")
+        }
     })
 
 
